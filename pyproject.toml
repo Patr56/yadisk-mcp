@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yadisk-mcp"
+version = "0.1.0"
+description = "MCP server for Yandex Disk — manage files, folders, sharing and trash via Claude"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "yadisk[sync]>=3.0.0",
+]
+
+[project.scripts]
+yadisk-mcp = "yadisk_mcp.server:mcp.run"
+
+[project.urls]
+Homepage = "https://github.com/phoroshilov/yadisk-mcp"
+Repository = "https://github.com/phoroshilov/yadisk-mcp"
+Issues = "https://github.com/phoroshilov/yadisk-mcp/issues"
