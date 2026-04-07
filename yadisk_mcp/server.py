@@ -1,14 +1,13 @@
 """Yandex Disk MCP Server."""
 
 import os
-import asyncio
 from typing import Any
 import yadisk
 from mcp.server.fastmcp import FastMCP
 
 TOKEN = os.environ.get("YANDEX_DISK_TOKEN", "")
 
-mcp = FastMCP("yadisk", dependencies=["yadisk"])
+mcp = FastMCP("yadisk")
 
 
 def get_client() -> yadisk.Client:
