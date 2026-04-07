@@ -200,6 +200,23 @@ def get_download_url(path: str) -> dict:
 
 
 @mcp.tool()
+def upload_local_file(local_path: str, disk_path: str, overwrite: bool = False) -> dict:
+    """Upload a local file from the server's filesystem to Yandex Disk.
+
+    Args:
+        local_path: Absolute path to the file on the local filesystem (e.g. "/home/user/video.mp4").
+        disk_path: Destination path on Yandex Disk (e.g. "/Videos/video.mp4").
+        overwrite: Overwrite if file already exists on Yandex Disk.
+    """
+    import os
+    if not os.path.isfile(local_path):
+        raise FileNotFoundError(f"Local file not found: {local_path}")
+    with get_client() as client:
+        client.upload(local_path, disk_path, overwrite=overwrite)
+    return {"uploaded": {"from": local_path, "to": disk_path}}
+
+
+@mcp.tool()
 def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
     """Upload a file to Yandex Disk by downloading it from a remote URL.
 
