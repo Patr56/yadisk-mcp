@@ -11,7 +11,8 @@ license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0.0",
-    "yadisk[sync]>=3.0.0",
+    "yadisk>=3.0.0",
+    "requests>=2.28.0",
 ]
 
 [project.scripts]

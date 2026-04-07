@@ -27,17 +27,52 @@ MCP server for **Yandex Disk** — manage files, folders, sharing, and trash via
 
 ## Getting a Token
 
-Run the helper script (no extra dependencies needed):
+### Step 1 — Create a Yandex OAuth app
+
+1. Go to [oauth.yandex.ru](https://oauth.yandex.ru) → **Create app** → choose **"For authorizing users"**
+2. Fill in a name (anything, e.g. `yadisk-mcp`) and upload any icon (required)
+3. On the **Platforms** step select **Web services** and set Callback URL to:
+   ```
+   https://oauth.yandex.ru/verification_code
+   ```
+4. On the **Permissions** step, in the **Additional** field add these scopes one by one:
+   - `cloud_api:disk.read`
+   - `cloud_api:disk.write`
+   - `cloud_api:disk.app_folder`
+   - `cloud_api:disk.info`
+5. Complete the wizard — you'll get a **Client ID** and **Client Secret**
+
+### Step 2 — Get the token
+
+Open this URL in your browser (replace `<CLIENT_ID>` with your Client ID):
+
+```
+https://oauth.yandex.ru/authorize?response_type=code&client_id=<CLIENT_ID>
+```
+
+Authorize the app. You'll receive a short **code**.
+
+Then exchange it for a token:
+
+```bash
+curl -X POST https://oauth.yandex.ru/token \
+  -d "grant_type=authorization_code" \
+  -d "code=<CODE>" \
+  -d "client_id=<CLIENT_ID>" \
+  -d "client_secret=<CLIENT_SECRET>"
+```
+
+The response contains `access_token` — use that as `YANDEX_DISK_TOKEN`.
+
+The token is valid for **1 year**. To refresh it, repeat Step 2 or use the `refresh_token` from the same response.
+
+### Helper script
+
+Alternatively, run the bundled interactive helper (no extra dependencies):
 
 ```bash
 python3 get_token.py
 ```
-
-Or do it manually:
-1. Go to [oauth.yandex.ru](https://oauth.yandex.ru/client/new) and create an app
-2. Platform: **Web services**, Callback URL: `https://oauth.yandex.ru/verification_code`
-3. Permissions: **Yandex.Disk REST API** (all `cloud_api:disk.*` scopes)
-4. Get a token via the OAuth flow
 
 ## Installation
 
