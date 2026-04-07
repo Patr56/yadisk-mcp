@@ -1,58 +1,86 @@
 # yadisk-mcp
 
-MCP server for **Yandex Disk** — manage files, folders, sharing, and trash via Claude or any MCP-compatible client.
+[![CI](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml)
 
-## Features
+MCP-сервер для **Яндекс Диска** — управляй файлами, папками, публикацией и корзиной через Claude или любой MCP-совместимый клиент.
 
-| Tool | Description |
-|------|-------------|
-| `disk_info` | Quota, used/free space, user info |
-| `list_files` | List directory contents with sorting and pagination |
-| `list_recent_files` | Recently uploaded files |
-| `search_files` | Search by name with optional media type filter |
-| `get_metadata` | Metadata for any file or folder |
-| `create_folder` | Create folder (with intermediate dirs) |
-| `delete` | Move to Trash or permanently delete |
-| `copy` | Copy file/folder |
-| `move` | Move file/folder |
-| `rename` | Rename file/folder |
-| `get_download_url` | Get a direct temporary download link |
-| `upload_from_url` | Upload a file from a remote URL |
-| `publish` | Publish and get public URL |
-| `unpublish` | Revoke public access |
-| `get_public_resource` | Inspect a public resource by key/URL |
-| `list_trash` | List Trash contents |
-| `restore_from_trash` | Restore item from Trash |
-| `empty_trash` | Empty Trash permanently |
+[English version](README_EN.md)
 
-## Getting a Token
+## Инструменты
 
-### Step 1 — Create a Yandex OAuth app
+### Информация и поиск
 
-1. Go to [oauth.yandex.ru](https://oauth.yandex.ru) → **Create app** → choose **"For authorizing users"**
-2. Fill in a name (anything, e.g. `yadisk-mcp`) and upload any icon (required)
-3. On the **Platforms** step select **Web services** and set Callback URL to:
+| Инструмент | Описание |
+|---|---|
+| `disk_info` | Квота, использованное/свободное место, данные пользователя |
+| `list_files` | Список файлов в папке с сортировкой и пагинацией |
+| `list_recent_files` | Последние загруженные файлы |
+| `search_files` | Поиск по имени с фильтром по типу медиа |
+| `get_metadata` | Метаданные файла или папки |
+
+### Файловые операции
+
+| Инструмент | Описание |
+|---|---|
+| `create_folder` | Создать папку (включая промежуточные) |
+| `delete` | Переместить в корзину или удалить насовсем |
+| `copy` | Копировать файл/папку |
+| `move` | Переместить файл/папку |
+| `rename` | Переименовать файл/папку |
+
+### Загрузка и скачивание
+
+| Инструмент | Описание |
+|---|---|
+| `upload_local_file` | Загрузить локальный файл на Диск (до ~100 МБ) |
+| `upload_local_file_background` | Загрузить большой файл в фоне — возвращает `job_id` мгновенно |
+| `get_upload_status` | Проверить статус фоновой загрузки (%, байты, имя файла) |
+| `list_upload_jobs` | Список всех активных/завершённых загрузок |
+| `upload_from_url` | Загрузить файл по URL |
+| `get_download_url` | Получить прямую ссылку на скачивание |
+
+### Публикация
+
+| Инструмент | Описание |
+|---|---|
+| `publish` | Опубликовать файл/папку и получить публичную ссылку |
+| `unpublish` | Закрыть публичный доступ |
+| `get_public_resource` | Информация о публичном ресурсе по ключу или ссылке |
+
+### Корзина
+
+| Инструмент | Описание |
+|---|---|
+| `list_trash` | Список файлов в корзине |
+| `restore_from_trash` | Восстановить файл из корзины |
+| `empty_trash` | Очистить корзину |
+
+## Получение токена
+
+### Шаг 1 — Создай OAuth-приложение на Яндексе
+
+1. Зайди на [oauth.yandex.ru](https://oauth.yandex.ru) → **Создать приложение** → **Для авторизации пользователей**
+2. Введи любое название, загрузи иконку (обязательно)
+3. На шаге **Платформы** выбери **Веб-сервисы**, Callback URL:
    ```
    https://oauth.yandex.ru/verification_code
    ```
-4. On the **Permissions** step, in the **Additional** field add these scopes one by one:
+4. На шаге **Права** в поле **Дополнительные** добавь по одному:
    - `cloud_api:disk.read`
    - `cloud_api:disk.write`
    - `cloud_api:disk.app_folder`
    - `cloud_api:disk.info`
-5. Complete the wizard — you'll get a **Client ID** and **Client Secret**
+5. Завершил — получишь **Client ID** и **Client Secret**
 
-### Step 2 — Get the token
+### Шаг 2 — Получи токен
 
-Open this URL in your browser (replace `<CLIENT_ID>` with your Client ID):
+Открой в браузере (замени `<CLIENT_ID>` на свой):
 
 ```
 https://oauth.yandex.ru/authorize?response_type=code&client_id=<CLIENT_ID>
 ```
 
-Authorize the app. You'll receive a short **code**.
-
-Then exchange it for a token:
+Авторизуй приложение, получи **код** и обменяй его на токен:
 
 ```bash
 curl -X POST https://oauth.yandex.ru/token \
@@ -62,25 +90,21 @@ curl -X POST https://oauth.yandex.ru/token \
   -d "client_secret=<CLIENT_SECRET>"
 ```
 
-The response contains `access_token` — use that as `YANDEX_DISK_TOKEN`.
+Используй `access_token` из ответа как `YANDEX_DISK_TOKEN`. Токен действует **1 год**.
 
-The token is valid for **1 year**. To refresh it, repeat Step 2 or use the `refresh_token` from the same response.
-
-### Helper script
-
-Alternatively, run the bundled interactive helper (no extra dependencies):
+### Вспомогательный скрипт
 
 ```bash
 python3 get_token.py
 ```
 
-## Installation
+## Установка
 
 ```bash
 pip install yadisk-mcp
 ```
 
-Or from source:
+Или из исходников:
 
 ```bash
 git clone https://github.com/Patr56/yadisk-mcp
@@ -88,11 +112,15 @@ cd yadisk-mcp
 pip install -e .
 ```
 
-## Configuration
+## Настройка
 
-### Claude Code
+### Claude Code (CLI)
 
-Add to your `~/.claude/settings.json`:
+```bash
+claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- python3 -m yadisk_mcp.server
+```
+
+Или вручную в `~/.claude.json`:
 
 ```json
 {
@@ -108,24 +136,9 @@ Add to your `~/.claude/settings.json`:
 }
 ```
 
-Or if installed via pip (uses the `yadisk-mcp` script):
-
-```json
-{
-  "mcpServers": {
-    "yadisk": {
-      "command": "yadisk-mcp",
-      "env": {
-        "YANDEX_DISK_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
 ### Claude Desktop
 
-Add to `claude_desktop_config.json`:
+В `claude_desktop_config.json`:
 
 ```json
 {
@@ -140,17 +153,36 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-## Usage Examples
+### OpenClaw / другой агент
 
-Once configured, Claude can use commands like:
+```json
+{
+  "mcp": {
+    "servers": {
+      "yadisk": {
+        "command": "python3",
+        "args": ["-m", "yadisk_mcp.server"],
+        "env": {
+          "YANDEX_DISK_TOKEN": "your_token_here"
+        }
+      }
+    }
+  }
+}
+```
 
-> "Show me what's in my Yandex Disk root folder"  
-> "Create a folder /Backups/2026-04"  
-> "Move all files from /Downloads to /Archive"  
-> "Publish /Documents/presentation.pdf and give me the link"  
-> "Empty the trash"  
-> "Search for all PDF files"
+## Примеры использования
 
-## License
+После настройки можно говорить Claude:
+
+> «Покажи что у меня на Яндекс Диске»
+> «Создай папку /Бэкапы/2026-04»
+> «Загрузи файл /home/user/video.mp4 на диск в папку /Видео»
+> «Опубликуй /Документы/презентация.pdf и дай ссылку»
+> «Загрузи большой файл в фоне и сообщи когда закончится»
+> «Очисти корзину»
+> «Найди все PDF-файлы»
+
+## Лицензия
 
 MIT
