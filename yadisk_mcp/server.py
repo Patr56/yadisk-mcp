@@ -12,8 +12,32 @@ TOKEN = os.environ.get("YANDEX_DISK_TOKEN", "")
 mcp = FastMCP("yadisk")
 
 # ─── Background upload jobs ───────────────────────────────────────────────────
-# job_id -> {"status": "uploading"|"done"|"error", "from": ..., "to": ..., "error": ...}
 _upload_jobs: dict[str, dict] = {}
+
+
+class _ProgressFile:
+    """Wraps an async file and tracks bytes read for progress reporting."""
+
+    def __init__(self, f: Any, job: dict) -> None:
+        self._f = f
+        self._job = job
+
+    async def read(self, size: int = -1) -> bytes:
+        data = await self._f.read(size)
+        self._job["bytes_uploaded"] = self._job.get("bytes_uploaded", 0) + len(data)
+        total = self._job.get("size", 0)
+        if total:
+            self._job["progress"] = round(self._job["bytes_uploaded"] / total * 100, 1)
+        return data
+
+    async def tell(self) -> int:
+        return await self._f.tell()
+
+    async def seek(self, *args: Any) -> int:
+        return await self._f.seek(*args)
+
+    async def close(self) -> None:
+        await self._f.close()
 
 
 def get_async_client() -> yadisk.AsyncClient:
@@ -245,11 +269,15 @@ async def upload_local_file_background(
 
     job_id = str(uuid.uuid4())[:8]
     file_size = os.path.getsize(local_path)
+    filename = os.path.basename(local_path)
     _upload_jobs[job_id] = {
         "status": "uploading",
+        "filename": filename,
         "from": local_path,
         "to": disk_path,
         "size": file_size,
+        "bytes_uploaded": 0,
+        "progress": 0.0,
     }
 
     async def _do_upload() -> None:
@@ -257,8 +285,9 @@ async def upload_local_file_background(
         try:
             async with get_async_client() as client:
                 async with aiofiles.open(local_path, "rb") as f:
-                    await client.upload(f, disk_path, overwrite=overwrite)
-            _upload_jobs[job_id]["status"] = "done"
+                    pf = _ProgressFile(f, _upload_jobs[job_id])
+                    await client.upload(pf, disk_path, overwrite=overwrite)
+            _upload_jobs[job_id].update({"status": "done", "progress": 100.0})
         except Exception as e:
             _upload_jobs[job_id]["status"] = "error"
             _upload_jobs[job_id]["error"] = str(e)
@@ -268,6 +297,7 @@ async def upload_local_file_background(
     return {
         "job_id": job_id,
         "status": "uploading",
+        "filename": filename,
         "from": local_path,
         "to": disk_path,
         "size": file_size,
