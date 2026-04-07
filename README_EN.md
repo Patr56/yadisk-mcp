@@ -6,6 +6,14 @@ MCP server for **Yandex Disk** — manage files, folders, sharing and trash via 
 
 [Русская версия](README.md)
 
+## Highlights
+
+- **Fully async** — all operations are non-blocking; parallel requests work without delays
+- **Background uploads for large files** — kick off a task and get a `job_id` instantly; check progress and status at any time
+- **Progress tracking** — upload percentage, bytes transferred, and filename for every background job
+- **22 tools** — full Yandex Disk API coverage: files, folders, search, sharing, trash
+- **Well-tested** — unit tests for all tools, CI on Python 3.11 and 3.12
+
 ## Tools
 
 ### Info & Search
