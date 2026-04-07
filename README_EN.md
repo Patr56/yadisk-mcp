@@ -1,6 +1,8 @@
 # yadisk-mcp
 
 [![CI](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/yadisk-mcp)](https://pypi.org/project/yadisk-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/yadisk-mcp)](https://pypi.org/project/yadisk-mcp/)
 
 MCP server for **Yandex Disk** — manage files, folders, sharing and trash via Claude or any MCP-compatible client.
 
@@ -121,10 +123,12 @@ pip install -e .
 
 ## Configuration
 
+You'll need a Yandex OAuth token — see [Getting a Token](#getting-a-token) for instructions.
+
 ### Claude Code (CLI)
 
 ```bash
-claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- python3 -m yadisk_mcp.server
+claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- yadisk-mcp
 ```
 
 Or manually in `~/.claude.json`:
@@ -133,8 +137,7 @@ Or manually in `~/.claude.json`:
 {
   "mcpServers": {
     "yadisk": {
-      "command": "python3",
-      "args": ["-m", "yadisk_mcp.server"],
+      "command": "yadisk-mcp",
       "env": {
         "YANDEX_DISK_TOKEN": "your_token_here"
       }
@@ -167,8 +170,7 @@ In `claude_desktop_config.json`:
   "mcp": {
     "servers": {
       "yadisk": {
-        "command": "python3",
-        "args": ["-m", "yadisk_mcp.server"],
+        "command": "yadisk-mcp",
         "env": {
           "YANDEX_DISK_TOKEN": "your_token_here"
         }

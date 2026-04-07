@@ -1,6 +1,8 @@
 # yadisk-mcp
 
 [![CI](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Patr56/yadisk-mcp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/yadisk-mcp)](https://pypi.org/project/yadisk-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/yadisk-mcp)](https://pypi.org/project/yadisk-mcp/)
 
 MCP-сервер для **Яндекс Диска** — управляй файлами, папками, публикацией и корзиной через Claude или любой MCP-совместимый клиент.
 
@@ -121,10 +123,12 @@ pip install -e .
 
 ## Настройка
 
+Для работы нужен OAuth-токен Яндекса — как его получить, смотри в разделе [Получение токена](#получение-токена).
+
 ### Claude Code (CLI)
 
 ```bash
-claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- python3 -m yadisk_mcp.server
+claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- yadisk-mcp
 ```
 
 Или вручную в `~/.claude.json`:
@@ -133,8 +137,7 @@ claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- python3 -m yadisk_
 {
   "mcpServers": {
     "yadisk": {
-      "command": "python3",
-      "args": ["-m", "yadisk_mcp.server"],
+      "command": "yadisk-mcp",
       "env": {
         "YANDEX_DISK_TOKEN": "your_token_here"
       }
@@ -167,8 +170,7 @@ claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- python3 -m yadisk_
   "mcp": {
     "servers": {
       "yadisk": {
-        "command": "python3",
-        "args": ["-m", "yadisk_mcp.server"],
+        "command": "yadisk-mcp",
         "env": {
           "YANDEX_DISK_TOKEN": "your_token_here"
         }
