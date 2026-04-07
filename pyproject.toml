@@ -19,6 +19,6 @@ dependencies = [
 yadisk-mcp = "yadisk_mcp.server:mcp.run"
 
 [project.urls]
-Homepage = "https://github.com/phoroshilov/yadisk-mcp"
-Repository = "https://github.com/phoroshilov/yadisk-mcp"
-Issues = "https://github.com/phoroshilov/yadisk-mcp/issues"
+Homepage = "https://github.com/Patr56/yadisk-mcp"
+Repository = "https://github.com/Patr56/yadisk-mcp"
+Issues = "https://github.com/Patr56/yadisk-mcp/issues"

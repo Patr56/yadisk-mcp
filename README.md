@@ -83,7 +83,7 @@ pip install yadisk-mcp
 Or from source:
 
 ```bash
-git clone https://github.com/phoroshilov/yadisk-mcp
+git clone https://github.com/Patr56/yadisk-mcp
 cd yadisk-mcp
 pip install -e .
 ```
