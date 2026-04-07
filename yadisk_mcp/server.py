@@ -1,6 +1,8 @@
 """Yandex Disk MCP Server."""
 
 import os
+import uuid
+import asyncio
 from typing import Any
 import yadisk
 from mcp.server.fastmcp import FastMCP
@@ -8,6 +10,10 @@ from mcp.server.fastmcp import FastMCP
 TOKEN = os.environ.get("YANDEX_DISK_TOKEN", "")
 
 mcp = FastMCP("yadisk")
+
+# ─── Background upload jobs ───────────────────────────────────────────────────
+# job_id -> {"status": "uploading"|"done"|"error", "from": ..., "to": ..., "error": ...}
+_upload_jobs: dict[str, dict] = {}
 
 
 def get_async_client() -> yadisk.AsyncClient:
@@ -204,10 +210,11 @@ async def get_download_url(path: str) -> dict:
 
 @mcp.tool()
 async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = False) -> dict:
-    """Upload a local file from the server's filesystem to Yandex Disk.
+    """Upload a local file to Yandex Disk (blocking). Use for files under ~100 MB.
+    For large files use upload_local_file_background to avoid timeout.
 
     Args:
-        local_path: Absolute path to the file on the local filesystem (e.g. "/home/user/video.mp4").
+        local_path: Absolute path to the file on the local filesystem.
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
@@ -218,6 +225,72 @@ async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = F
         async with aiofiles.open(local_path, "rb") as f:
             await client.upload(f, disk_path, overwrite=overwrite)
     return {"uploaded": {"from": local_path, "to": disk_path}}
+
+
+@mcp.tool()
+async def upload_local_file_background(
+    local_path: str, disk_path: str, overwrite: bool = False
+) -> dict:
+    """Start uploading a large local file to Yandex Disk in the background.
+    Returns immediately with a job_id. Use get_upload_status(job_id) to check progress.
+    Suitable for files of any size — no timeout issues.
+
+    Args:
+        local_path: Absolute path to the file on the local filesystem.
+        disk_path: Destination path on Yandex Disk (e.g. "/Videos/big_video.mp4").
+        overwrite: Overwrite if file already exists on Yandex Disk.
+    """
+    if not os.path.isfile(local_path):
+        raise FileNotFoundError(f"Local file not found: {local_path}")
+
+    job_id = str(uuid.uuid4())[:8]
+    file_size = os.path.getsize(local_path)
+    _upload_jobs[job_id] = {
+        "status": "uploading",
+        "from": local_path,
+        "to": disk_path,
+        "size": file_size,
+    }
+
+    async def _do_upload() -> None:
+        import aiofiles
+        try:
+            async with get_async_client() as client:
+                async with aiofiles.open(local_path, "rb") as f:
+                    await client.upload(f, disk_path, overwrite=overwrite)
+            _upload_jobs[job_id]["status"] = "done"
+        except Exception as e:
+            _upload_jobs[job_id]["status"] = "error"
+            _upload_jobs[job_id]["error"] = str(e)
+
+    asyncio.create_task(_do_upload())
+
+    return {
+        "job_id": job_id,
+        "status": "uploading",
+        "from": local_path,
+        "to": disk_path,
+        "size": file_size,
+        "hint": f"Check progress with: get_upload_status('{job_id}')",
+    }
+
+
+@mcp.tool()
+async def get_upload_status(job_id: str) -> dict:
+    """Check the status of a background upload started with upload_local_file_background.
+
+    Args:
+        job_id: The job ID returned by upload_local_file_background.
+    """
+    if job_id not in _upload_jobs:
+        return {"error": f"Job '{job_id}' not found"}
+    return _upload_jobs[job_id]
+
+
+@mcp.tool()
+async def list_upload_jobs() -> list[dict]:
+    """List all background upload jobs and their statuses."""
+    return [{"job_id": jid, **info} for jid, info in _upload_jobs.items()]
 
 
 @mcp.tool()
