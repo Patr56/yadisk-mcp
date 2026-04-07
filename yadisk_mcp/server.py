@@ -10,22 +10,22 @@ TOKEN = os.environ.get("YANDEX_DISK_TOKEN", "")
 mcp = FastMCP("yadisk")
 
 
-def get_client() -> yadisk.Client:
+def get_async_client() -> yadisk.AsyncClient:
     if not TOKEN:
         raise RuntimeError(
             "YANDEX_DISK_TOKEN environment variable is not set. "
             "Get a token at https://oauth.yandex.ru and set it."
         )
-    return yadisk.Client(token=TOKEN)
+    return yadisk.AsyncClient(token=TOKEN)
 
 
 # ─── Disk info ───────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def disk_info() -> dict:
+async def disk_info() -> dict:
     """Get Yandex Disk quota and usage information."""
-    with get_client() as client:
-        info = client.get_disk_info()
+    async with get_async_client() as client:
+        info = await client.get_disk_info()
         return {
             "total_space": info.total_space,
             "used_space": info.used_space,
@@ -41,7 +41,7 @@ def disk_info() -> dict:
 # ─── Directory listing ────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_files(
+async def list_files(
     path: str = "/",
     limit: int = 50,
     offset: int = 0,
@@ -55,33 +55,34 @@ def list_files(
         offset: Offset for pagination.
         sort: Sort field: name, created, modified, size. Prefix with "-" for descending.
     """
-    with get_client() as client:
-        items = client.listdir(
+    async with get_async_client() as client:
+        result = []
+        async for item in client.listdir(
             path,
             limit=min(limit, 100),
             offset=offset,
             sort=sort,
-        )
-        result = []
-        for item in items:
+        ):
             result.append(_resource_to_dict(item))
         return result
 
 
 @mcp.tool()
-def list_recent_files(limit: int = 20) -> list[dict]:
+async def list_recent_files(limit: int = 20) -> list[dict]:
     """List recently uploaded files across the entire disk.
 
     Args:
         limit: Max number of files to return (1–100).
     """
-    with get_client() as client:
-        items = client.get_last_uploaded(limit=min(limit, 100))
-        return [_resource_to_dict(item) for item in items]
+    async with get_async_client() as client:
+        result = []
+        async for item in client.get_last_uploaded(limit=min(limit, 100)):
+            result.append(_resource_to_dict(item))
+        return result
 
 
 @mcp.tool()
-def search_files(query: str, limit: int = 20, media_type: str | None = None) -> list[dict]:
+async def search_files(query: str, limit: int = 20, media_type: str | None = None) -> list[dict]:
     """Search for files on Yandex Disk by name.
 
     Args:
@@ -91,59 +92,61 @@ def search_files(query: str, limit: int = 20, media_type: str | None = None) -> 
                     data, development, disk_image, document, encoded, executable,
                     flash, font, image, msi, text, unknown, video, web.
     """
-    with get_client() as client:
+    async with get_async_client() as client:
         kwargs: dict[str, Any] = {"limit": min(limit, 100)}
         if media_type:
             kwargs["media_type"] = media_type
-        items = client.search(query, **kwargs)
-        return [_resource_to_dict(item) for item in items]
+        result = []
+        async for item in client.search(query, **kwargs):
+            result.append(_resource_to_dict(item))
+        return result
 
 
 # ─── Metadata ────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def get_metadata(path: str) -> dict:
+async def get_metadata(path: str) -> dict:
     """Get metadata for a file or folder.
 
     Args:
         path: Path on Yandex Disk (e.g. "/Documents/file.txt").
     """
-    with get_client() as client:
-        info = client.get_meta(path)
+    async with get_async_client() as client:
+        info = await client.get_meta(path)
         return _resource_to_dict(info)
 
 
 # ─── Create / delete ──────────────────────────────────────────────────────────
 
 @mcp.tool()
-def create_folder(path: str) -> dict:
+async def create_folder(path: str) -> dict:
     """Create a folder (including intermediate directories).
 
     Args:
         path: Path of the folder to create (e.g. "/Documents/NewFolder").
     """
-    with get_client() as client:
-        client.mkdir(path)
+    async with get_async_client() as client:
+        await client.mkdir(path)
         return {"created": path}
 
 
 @mcp.tool()
-def delete(path: str, permanently: bool = False) -> dict:
+async def delete(path: str, permanently: bool = False) -> dict:
     """Delete a file or folder.
 
     Args:
         path: Path to delete (e.g. "/Documents/old_file.txt").
         permanently: If True, skip trash and delete permanently. Default False.
     """
-    with get_client() as client:
-        client.remove(path, permanently=permanently)
+    async with get_async_client() as client:
+        await client.remove(path, permanently=permanently)
         return {"deleted": path, "permanently": permanently}
 
 
 # ─── Copy / move ──────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def copy(src: str, dst: str, overwrite: bool = False) -> dict:
+async def copy(src: str, dst: str, overwrite: bool = False) -> dict:
     """Copy a file or folder to a new location.
 
     Args:
@@ -151,13 +154,13 @@ def copy(src: str, dst: str, overwrite: bool = False) -> dict:
         dst: Destination path (e.g. "/Archive/file.txt").
         overwrite: Overwrite destination if it exists.
     """
-    with get_client() as client:
-        client.copy(src, dst, overwrite=overwrite)
+    async with get_async_client() as client:
+        await client.copy(src, dst, overwrite=overwrite)
         return {"copied": {"from": src, "to": dst}}
 
 
 @mcp.tool()
-def move(src: str, dst: str, overwrite: bool = False) -> dict:
+async def move(src: str, dst: str, overwrite: bool = False) -> dict:
     """Move a file or folder to a new location.
 
     Args:
@@ -165,13 +168,13 @@ def move(src: str, dst: str, overwrite: bool = False) -> dict:
         dst: Destination path (e.g. "/Archive/file.txt").
         overwrite: Overwrite destination if it exists.
     """
-    with get_client() as client:
-        client.move(src, dst, overwrite=overwrite)
+    async with get_async_client() as client:
+        await client.move(src, dst, overwrite=overwrite)
         return {"moved": {"from": src, "to": dst}}
 
 
 @mcp.tool()
-def rename(path: str, new_name: str) -> dict:
+async def rename(path: str, new_name: str) -> dict:
     """Rename a file or folder (moves it within the same directory).
 
     Args:
@@ -180,27 +183,27 @@ def rename(path: str, new_name: str) -> dict:
     """
     parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
     dst = f"{parent.rstrip('/')}/{new_name}"
-    with get_client() as client:
-        client.move(path, dst)
+    async with get_async_client() as client:
+        await client.move(path, dst)
         return {"renamed": {"from": path, "to": dst}}
 
 
 # ─── Upload / download ────────────────────────────────────────────────────────
 
 @mcp.tool()
-def get_download_url(path: str) -> dict:
+async def get_download_url(path: str) -> dict:
     """Get a temporary direct download URL for a file.
 
     Args:
         path: Path on Yandex Disk (e.g. "/Documents/report.pdf").
     """
-    with get_client() as client:
-        link = client.get_download_link(path)
+    async with get_async_client() as client:
+        link = await client.get_download_link(path)
         return {"path": path, "url": link}
 
 
 @mcp.tool()
-def upload_local_file(local_path: str, disk_path: str, overwrite: bool = False) -> dict:
+async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = False) -> dict:
     """Upload a local file from the server's filesystem to Yandex Disk.
 
     Args:
@@ -208,16 +211,17 @@ def upload_local_file(local_path: str, disk_path: str, overwrite: bool = False) 
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
-    import os
     if not os.path.isfile(local_path):
         raise FileNotFoundError(f"Local file not found: {local_path}")
-    with get_client() as client:
-        client.upload(local_path, disk_path, overwrite=overwrite)
+    import aiofiles
+    async with get_async_client() as client:
+        async with aiofiles.open(local_path, "rb") as f:
+            await client.upload(f, disk_path, overwrite=overwrite)
     return {"uploaded": {"from": local_path, "to": disk_path}}
 
 
 @mcp.tool()
-def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
+async def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
     """Upload a file to Yandex Disk by downloading it from a remote URL.
 
     Args:
@@ -225,23 +229,23 @@ def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
         path: Destination path on Yandex Disk (e.g. "/Downloads/file.zip").
         overwrite: Overwrite if file already exists.
     """
-    with get_client() as client:
-        client.upload_by_link(url, path, overwrite=overwrite)
+    async with get_async_client() as client:
+        await client.upload_by_link(url, path, overwrite=overwrite)
         return {"uploaded": {"url": url, "to": path}}
 
 
 # ─── Sharing / publishing ─────────────────────────────────────────────────────
 
 @mcp.tool()
-def publish(path: str) -> dict:
+async def publish(path: str) -> dict:
     """Publish a file or folder and return its public URL.
 
     Args:
         path: Path on Yandex Disk to publish (e.g. "/Documents/presentation.pdf").
     """
-    with get_client() as client:
-        client.publish(path)
-        info = client.get_meta(path)
+    async with get_async_client() as client:
+        await client.publish(path)
+        info = await client.get_meta(path)
         return {
             "path": path,
             "public_url": info.public_url,
@@ -250,19 +254,19 @@ def publish(path: str) -> dict:
 
 
 @mcp.tool()
-def unpublish(path: str) -> dict:
+async def unpublish(path: str) -> dict:
     """Revoke public access to a file or folder.
 
     Args:
         path: Path on Yandex Disk (e.g. "/Documents/presentation.pdf").
     """
-    with get_client() as client:
-        client.unpublish(path)
+    async with get_async_client() as client:
+        await client.unpublish(path)
         return {"unpublished": path}
 
 
 @mcp.tool()
-def get_public_resource(public_key: str, path: str = "/", limit: int = 20) -> dict:
+async def get_public_resource(public_key: str, path: str = "/", limit: int = 20) -> dict:
     """Get information about a public resource by its public key or URL.
 
     Args:
@@ -270,32 +274,34 @@ def get_public_resource(public_key: str, path: str = "/", limit: int = 20) -> di
         path: Sub-path within a public folder (use "/" for root).
         limit: Max items to list if the resource is a folder.
     """
-    with get_client() as client:
-        info = client.get_public_meta(public_key, path=path, limit=limit)
+    async with get_async_client() as client:
+        info = await client.get_public_meta(public_key, path=path, limit=limit)
         return _resource_to_dict(info)
 
 
 # ─── Trash ────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_trash(limit: int = 20, offset: int = 0) -> list[dict]:
+async def list_trash(limit: int = 20, offset: int = 0) -> list[dict]:
     """List files in the Trash.
 
     Args:
         limit: Max items to return (1–100).
         offset: Offset for pagination.
     """
-    with get_client() as client:
-        items = client.trash_listdir(
+    async with get_async_client() as client:
+        result = []
+        async for item in client.trash_listdir(
             "/",
             limit=min(limit, 100),
             offset=offset,
-        )
-        return [_resource_to_dict(item) for item in items]
+        ):
+            result.append(_resource_to_dict(item))
+        return result
 
 
 @mcp.tool()
-def restore_from_trash(path: str, destination: str | None = None, overwrite: bool = False) -> dict:
+async def restore_from_trash(path: str, destination: str | None = None, overwrite: bool = False) -> dict:
     """Restore a file or folder from Trash.
 
     Args:
@@ -303,19 +309,19 @@ def restore_from_trash(path: str, destination: str | None = None, overwrite: boo
         destination: Optional new path to restore to. Uses original path if omitted.
         overwrite: Overwrite if destination already exists.
     """
-    with get_client() as client:
+    async with get_async_client() as client:
         kwargs: dict[str, Any] = {"overwrite": overwrite}
         if destination:
             kwargs["dst_path"] = destination
-        client.restore_trash(path, **kwargs)
+        await client.restore_trash(path, **kwargs)
         return {"restored": path, "destination": destination or "original location"}
 
 
 @mcp.tool()
-def empty_trash() -> dict:
+async def empty_trash() -> dict:
     """Permanently delete all files in Trash."""
-    with get_client() as client:
-        client.remove_trash("/")
+    async with get_async_client() as client:
+        await client.remove_trash("/")
         return {"trash": "emptied"}
 
 
@@ -335,7 +341,6 @@ def _resource_to_dict(r: Any) -> dict:
         "public_url": getattr(r, "public_url", None),
         "public_key": getattr(r, "public_key", None),
     }
-    # Embed sub-items if directory listing included them
     embedded = getattr(r, "embedded", None)
     if embedded is not None:
         items_attr = getattr(embedded, "items", None)
