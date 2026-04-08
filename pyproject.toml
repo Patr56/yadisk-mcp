@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yadisk-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "MCP server for Yandex Disk — manage files, folders, sharing and trash via Claude"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-yadisk-mcp = "yadisk_mcp.server:mcp.run"
+yadisk-mcp = "yadisk_mcp.server:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

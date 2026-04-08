@@ -16,6 +16,25 @@ _upload_jobs: dict[str, dict] = {}
 _MAX_COMPLETED_JOBS = 200  # cap to prevent unbounded memory growth
 
 
+# ─── Configuration ────────────────────────────────────────────────────────────
+
+# None = not explicitly set (fall back to env var); True/False = explicit override
+_config: dict[str, bool | None] = {"read_only": None}
+
+
+def configure(*, read_only: bool | None = None) -> None:
+    """Configure the MCP server programmatically.
+
+    Explicit values set here take priority over environment variables.
+
+    Args:
+        read_only: If True, all write operations are disabled. If False, explicitly
+                   enables writes even when YADISK_MCP_READ_ONLY env var is set.
+                   If None (default), defers to the YADISK_MCP_READ_ONLY env var.
+    """
+    _config["read_only"] = read_only
+
+
 # ─── Security helpers ─────────────────────────────────────────────────────────
 
 def get_async_client() -> yadisk.AsyncClient:
@@ -27,6 +46,22 @@ def get_async_client() -> yadisk.AsyncClient:
             "Get a token at https://oauth.yandex.ru and set it."
         )
     return yadisk.AsyncClient(token=token)
+
+
+def _assert_writable() -> None:
+    """Raise PermissionError if the server is running in read-only mode.
+
+    Priority: configure(read_only=...) > --read-only CLI flag > YADISK_MCP_READ_ONLY env var.
+    """
+    explicit = _config["read_only"]
+    if explicit is not None:
+        read_only = explicit
+    else:
+        read_only = os.environ.get("YADISK_MCP_READ_ONLY", "").lower() in ("1", "true", "yes")
+    if read_only:
+        raise PermissionError(
+            "The server is running in read-only mode. This operation is not allowed."
+        )
 
 
 def _get_upload_allowed_dirs() -> list[str] | None:
@@ -222,6 +257,7 @@ async def create_folder(path: str) -> dict:
     Args:
         path: Path of the folder to create (e.g. "/Documents/NewFolder").
     """
+    _assert_writable()
     async with get_async_client() as client:
         await client.mkdir(path)
         return {"created": path}
@@ -235,6 +271,7 @@ async def delete(path: str, permanently: bool = False) -> dict:
         path: Path to delete (e.g. "/Documents/old_file.txt").
         permanently: If True, skip trash and delete permanently. Default False.
     """
+    _assert_writable()
     # H2: prevent accidentally nuking the entire disk root permanently
     normalized = path.rstrip("/") or "/"
     if normalized in ("/", "disk:") and permanently:
@@ -258,6 +295,7 @@ async def copy(src: str, dst: str, overwrite: bool = False) -> dict:
         dst: Destination path (e.g. "/Archive/file.txt").
         overwrite: Overwrite destination if it exists.
     """
+    _assert_writable()
     async with get_async_client() as client:
         await client.copy(src, dst, overwrite=overwrite)
         return {"copied": {"from": src, "to": dst}}
@@ -272,6 +310,7 @@ async def move(src: str, dst: str, overwrite: bool = False) -> dict:
         dst: Destination path (e.g. "/Archive/file.txt").
         overwrite: Overwrite destination if it exists.
     """
+    _assert_writable()
     async with get_async_client() as client:
         await client.move(src, dst, overwrite=overwrite)
         return {"moved": {"from": src, "to": dst}}
@@ -285,6 +324,7 @@ async def rename(path: str, new_name: str) -> dict:
         path: Full path of the item (e.g. "/Documents/old_name.txt").
         new_name: New name without path (e.g. "new_name.txt").
     """
+    _assert_writable()
     # L2: reject path separators in the new name to prevent path traversal
     if "/" in new_name or "\\" in new_name:
         raise ValueError(
@@ -321,6 +361,7 @@ async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = F
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
+    _assert_writable()
     # H1: resolve symlinks and enforce allowlist
     real_path = _check_upload_path(local_path)
     if not os.path.isfile(real_path):
@@ -345,6 +386,7 @@ async def upload_local_file_background(
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/big_video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
+    _assert_writable()
     # H1: resolve symlinks and enforce allowlist
     real_path = _check_upload_path(local_path)
     if not os.path.isfile(real_path):
@@ -400,6 +442,7 @@ async def get_upload_status(job_id: str) -> dict:
     Args:
         job_id: The job ID returned by upload_local_file_background.
     """
+    _assert_writable()
     if job_id not in _upload_jobs:
         return {"error": f"Job '{job_id}' not found"}
     return _upload_jobs[job_id]
@@ -408,6 +451,7 @@ async def get_upload_status(job_id: str) -> dict:
 @mcp.tool()
 async def list_upload_jobs() -> list[dict]:
     """List all background upload jobs and their statuses."""
+    _assert_writable()
     return [{"job_id": jid, **info} for jid, info in _upload_jobs.items()]
 
 
@@ -420,6 +464,7 @@ async def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
         path: Destination path on Yandex Disk (e.g. "/Downloads/file.zip").
         overwrite: Overwrite if file already exists.
     """
+    _assert_writable()
     # M3: reject non-http(s) and localhost/link-local URLs
     _validate_url(url)
     async with get_async_client() as client:
@@ -436,6 +481,7 @@ async def publish(path: str) -> dict:
     Args:
         path: Path on Yandex Disk to publish (e.g. "/Documents/presentation.pdf").
     """
+    _assert_writable()
     async with get_async_client() as client:
         await client.publish(path)
         info = await client.get_meta(path)
@@ -453,6 +499,7 @@ async def unpublish(path: str) -> dict:
     Args:
         path: Path on Yandex Disk (e.g. "/Documents/presentation.pdf").
     """
+    _assert_writable()
     async with get_async_client() as client:
         await client.unpublish(path)
         return {"unpublished": path}
@@ -502,6 +549,7 @@ async def restore_from_trash(path: str, destination: str | None = None, overwrit
         destination: Optional new path to restore to. Uses original path if omitted.
         overwrite: Overwrite if destination already exists.
     """
+    _assert_writable()
     async with get_async_client() as client:
         kwargs: dict[str, Any] = {"overwrite": overwrite}
         if destination:
@@ -513,6 +561,7 @@ async def restore_from_trash(path: str, destination: str | None = None, overwrit
 @mcp.tool()
 async def empty_trash() -> dict:
     """Permanently delete all files in Trash."""
+    _assert_writable()
     async with get_async_client() as client:
         await client.remove_trash("/")
         return {"trash": "emptied"}
@@ -542,5 +591,20 @@ def _resource_to_dict(r: Any) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-if __name__ == "__main__":
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Yandex Disk MCP Server")
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        default=False,
+        help="Disable all write operations (overrides YADISK_MCP_READ_ONLY env var)",
+    )
+    args = parser.parse_args()
+    if args.read_only:
+        configure(read_only=True)
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
