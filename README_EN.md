@@ -180,6 +180,60 @@ In `claude_desktop_config.json`:
 }
 ```
 
+## Read-only mode
+
+Run the server with `--read-only` to disable all write operations — useful for safe browsing or demos.
+
+Three ways to enable, in priority order (explicit beats implicit):
+
+```bash
+# 1. CLI flag
+yadisk-mcp --read-only
+
+# 2. Environment variable
+YADISK_MCP_READ_ONLY=true yadisk-mcp
+```
+
+```python
+# 3. Programmatic (library use)
+from yadisk_mcp.server import configure, mcp
+configure(read_only=True)
+mcp.run()
+```
+
+In Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "yadisk": {
+      "command": "yadisk-mcp",
+      "args": ["--read-only"],
+      "env": {
+        "YANDEX_DISK_TOKEN": "your_token_here"
+      }
+    }
+  }
+}
+```
+
+**Blocked:** `create_folder`, `delete`, `copy`, `move`, `rename`, `upload_local_file`, `upload_local_file_background`, `upload_from_url`, `get_upload_status`, `list_upload_jobs`, `publish`, `unpublish`, `restore_from_trash`, `empty_trash`
+
+**Allowed:** `disk_info`, `list_files`, `list_recent_files`, `search_files`, `get_metadata`, `get_download_url`, `get_public_resource`, `list_trash`
+
+## Security
+
+### Restricting file uploads
+
+By default, `upload_local_file` and `upload_local_file_background` can upload any local file. To restrict uploads to specific directories, set `YADISK_MCP_UPLOAD_ALLOWED_DIRS`:
+
+```bash
+# Allow uploads only from /home/user/uploads and /tmp/exports
+YADISK_MCP_UPLOAD_ALLOWED_DIRS=/home/user/uploads,/tmp/exports yadisk-mcp
+```
+
+Symlinks pointing outside the allowed directories are automatically blocked.
+
 ## Usage Examples
 
 After setup, you can tell Claude:

@@ -180,6 +180,60 @@ claude mcp add yadisk -e YANDEX_DISK_TOKEN=your_token_here -- yadisk-mcp
 }
 ```
 
+## Режим только для чтения
+
+Запусти сервер с флагом `--read-only`, чтобы запретить любые операции записи — полезно для безопасного просмотра диска или демонстраций.
+
+Три способа включить (приоритет сверху вниз, явное важнее неявного):
+
+```bash
+# 1. Флаг командной строки
+yadisk-mcp --read-only
+
+# 2. Переменная окружения
+YADISK_MCP_READ_ONLY=true yadisk-mcp
+```
+
+```python
+# 3. Программно (использование как библиотека)
+from yadisk_mcp.server import configure, mcp
+configure(read_only=True)
+mcp.run()
+```
+
+В конфиге Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "yadisk": {
+      "command": "yadisk-mcp",
+      "args": ["--read-only"],
+      "env": {
+        "YANDEX_DISK_TOKEN": "your_token_here"
+      }
+    }
+  }
+}
+```
+
+**Заблокированы:** `create_folder`, `delete`, `copy`, `move`, `rename`, `upload_local_file`, `upload_local_file_background`, `upload_from_url`, `get_upload_status`, `list_upload_jobs`, `publish`, `unpublish`, `restore_from_trash`, `empty_trash`
+
+**Доступны:** `disk_info`, `list_files`, `list_recent_files`, `search_files`, `get_metadata`, `get_download_url`, `get_public_resource`, `list_trash`
+
+## Безопасность
+
+### Ограничение загрузки файлов
+
+По умолчанию `upload_local_file` и `upload_local_file_background` могут загружать любые локальные файлы. Чтобы ограничить доступ конкретными папками, задай переменную `YADISK_MCP_UPLOAD_ALLOWED_DIRS`:
+
+```bash
+# Разрешить загрузку только из /home/user/uploads и /tmp/exports
+YADISK_MCP_UPLOAD_ALLOWED_DIRS=/home/user/uploads,/tmp/exports yadisk-mcp
+```
+
+Симлинки за пределы разрешённых папок автоматически блокируются.
+
 ## Примеры использования
 
 После настройки можно говорить Claude:
