@@ -1,18 +1,94 @@
 """Yandex Disk MCP Server."""
 
 import os
+import re
 import uuid
 import asyncio
 from typing import Any
+from urllib.parse import urlparse
 import yadisk
 from mcp.server.fastmcp import FastMCP
-
-TOKEN = os.environ.get("YANDEX_DISK_TOKEN", "")
 
 mcp = FastMCP("yadisk")
 
 # ─── Background upload jobs ───────────────────────────────────────────────────
 _upload_jobs: dict[str, dict] = {}
+_MAX_COMPLETED_JOBS = 200  # cap to prevent unbounded memory growth
+
+
+# ─── Security helpers ─────────────────────────────────────────────────────────
+
+def get_async_client() -> yadisk.AsyncClient:
+    # M1: read token lazily — picks up rotations, avoids global string in memory
+    token = os.environ.get("YANDEX_DISK_TOKEN", "")
+    if not token:
+        raise RuntimeError(
+            "YANDEX_DISK_TOKEN environment variable is not set. "
+            "Get a token at https://oauth.yandex.ru and set it."
+        )
+    return yadisk.AsyncClient(token=token)
+
+
+def _get_upload_allowed_dirs() -> list[str] | None:
+    """Return resolved allowed dirs from YADISK_MCP_UPLOAD_ALLOWED_DIRS, or None if unset."""
+    raw = os.environ.get("YADISK_MCP_UPLOAD_ALLOWED_DIRS", "")
+    if not raw:
+        return None
+    dirs = [os.path.realpath(d.strip()) for d in raw.split(",") if d.strip()]
+    return dirs or None
+
+
+def _check_upload_path(local_path: str) -> str:
+    """Resolve symlinks/.. and enforce allowlist. Returns the resolved path."""
+    real = os.path.realpath(local_path)
+    allowed = _get_upload_allowed_dirs()
+    if allowed is not None:
+        if not any(real == d or real.startswith(d + os.sep) for d in allowed):
+            raise PermissionError(
+                f"Upload from '{real}' is not allowed. "
+                f"Allowed directories: {', '.join(allowed)}. "
+                "Set YADISK_MCP_UPLOAD_ALLOWED_DIRS to configure."
+            )
+    return real
+
+
+def _validate_url(url: str) -> None:
+    """Reject non-http(s) schemes and localhost/link-local hosts (SSRF mitigation)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"URL must use http or https scheme, got: {parsed.scheme!r}"
+        )
+    host = (parsed.hostname or "").lower()
+    blocked = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    if host in blocked or host.startswith("169.254."):
+        raise ValueError(f"URL points to a disallowed host: {host!r}")
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Return error message with OAuth tokens and credential strings redacted."""
+    msg = str(e)
+    # Redact token= / bearer <value> patterns
+    msg = re.sub(
+        r'(?i)(token|bearer|access_token)[=:\s]+[A-Za-z0-9_\-\.]{8,}',
+        r'\1=<redacted>',
+        msg,
+    )
+    # Redact URL query strings that might carry tokens
+    msg = re.sub(r'\?[^\s]*', '?<redacted>', msg)
+    return msg
+
+
+def _evict_completed_jobs() -> None:
+    """Drop finished jobs when the dict exceeds _MAX_COMPLETED_JOBS."""
+    if len(_upload_jobs) < _MAX_COMPLETED_JOBS:
+        return
+    done_keys = [
+        k for k, v in _upload_jobs.items()
+        if v.get("status") in ("done", "error")
+    ]
+    for k in done_keys:
+        del _upload_jobs[k]
 
 
 class _ProgressFile:
@@ -38,15 +114,6 @@ class _ProgressFile:
 
     async def close(self) -> None:
         await self._f.close()
-
-
-def get_async_client() -> yadisk.AsyncClient:
-    if not TOKEN:
-        raise RuntimeError(
-            "YANDEX_DISK_TOKEN environment variable is not set. "
-            "Get a token at https://oauth.yandex.ru and set it."
-        )
-    return yadisk.AsyncClient(token=TOKEN)
 
 
 # ─── Disk info ───────────────────────────────────────────────────────────────
@@ -168,6 +235,13 @@ async def delete(path: str, permanently: bool = False) -> dict:
         path: Path to delete (e.g. "/Documents/old_file.txt").
         permanently: If True, skip trash and delete permanently. Default False.
     """
+    # H2: prevent accidentally nuking the entire disk root permanently
+    normalized = path.rstrip("/") or "/"
+    if normalized in ("/", "disk:") and permanently:
+        raise ValueError(
+            "Permanently deleting the root path '/' is not allowed. "
+            "Use permanently=False to move items to Trash instead."
+        )
     async with get_async_client() as client:
         await client.remove(path, permanently=permanently)
         return {"deleted": path, "permanently": permanently}
@@ -211,6 +285,11 @@ async def rename(path: str, new_name: str) -> dict:
         path: Full path of the item (e.g. "/Documents/old_name.txt").
         new_name: New name without path (e.g. "new_name.txt").
     """
+    # L2: reject path separators in the new name to prevent path traversal
+    if "/" in new_name or "\\" in new_name:
+        raise ValueError(
+            f"new_name must not contain path separators ('/' or '\\'): {new_name!r}"
+        )
     parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
     dst = f"{parent.rstrip('/')}/{new_name}"
     async with get_async_client() as client:
@@ -242,11 +321,13 @@ async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = F
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
-    if not os.path.isfile(local_path):
+    # H1: resolve symlinks and enforce allowlist
+    real_path = _check_upload_path(local_path)
+    if not os.path.isfile(real_path):
         raise FileNotFoundError(f"Local file not found: {local_path}")
     import aiofiles
     async with get_async_client() as client:
-        async with aiofiles.open(local_path, "rb") as f:
+        async with aiofiles.open(real_path, "rb") as f:
             await client.upload(f, disk_path, overwrite=overwrite)
     return {"uploaded": {"from": local_path, "to": disk_path}}
 
@@ -264,12 +345,18 @@ async def upload_local_file_background(
         disk_path: Destination path on Yandex Disk (e.g. "/Videos/big_video.mp4").
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
-    if not os.path.isfile(local_path):
+    # H1: resolve symlinks and enforce allowlist
+    real_path = _check_upload_path(local_path)
+    if not os.path.isfile(real_path):
         raise FileNotFoundError(f"Local file not found: {local_path}")
 
-    job_id = str(uuid.uuid4())[:8]
-    file_size = os.path.getsize(local_path)
-    filename = os.path.basename(local_path)
+    # M4: evict stale completed jobs before adding a new one
+    _evict_completed_jobs()
+
+    # L3: use full UUID (not truncated) to avoid collisions
+    job_id = str(uuid.uuid4())
+    file_size = os.path.getsize(real_path)
+    filename = os.path.basename(real_path)
     _upload_jobs[job_id] = {
         "status": "uploading",
         "filename": filename,
@@ -284,13 +371,14 @@ async def upload_local_file_background(
         import aiofiles
         try:
             async with get_async_client() as client:
-                async with aiofiles.open(local_path, "rb") as f:
+                async with aiofiles.open(real_path, "rb") as f:
                     pf = _ProgressFile(f, _upload_jobs[job_id])
                     await client.upload(pf, disk_path, overwrite=overwrite)
             _upload_jobs[job_id].update({"status": "done", "progress": 100.0})
         except Exception as e:
+            # M2: sanitize error before storing — strip tokens/credentials
             _upload_jobs[job_id]["status"] = "error"
-            _upload_jobs[job_id]["error"] = str(e)
+            _upload_jobs[job_id]["error"] = _sanitize_error(e)
 
     asyncio.create_task(_do_upload())
 
@@ -328,10 +416,12 @@ async def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
     """Upload a file to Yandex Disk by downloading it from a remote URL.
 
     Args:
-        url: Source URL to download the file from.
+        url: Source URL to download the file from (must be http or https).
         path: Destination path on Yandex Disk (e.g. "/Downloads/file.zip").
         overwrite: Overwrite if file already exists.
     """
+    # M3: reject non-http(s) and localhost/link-local URLs
+    _validate_url(url)
     async with get_async_client() as client:
         await client.upload_by_link(url, path, overwrite=overwrite)
         return {"uploaded": {"url": url, "to": path}}

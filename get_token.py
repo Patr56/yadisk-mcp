@@ -58,7 +58,13 @@ def main():
     if token:
         print(f"\n=== Your token ===")
         print(f"YANDEX_DISK_TOKEN={token}")
-        print("\nAdd this to your environment or MCP server config.")
+        print(
+            "\nSecurity reminder:"
+            "\n  - Do NOT commit this token to version control."
+            "\n  - Do NOT share terminal output that contains this token."
+            "\n  - Store it in a .env file (chmod 600) or a secrets manager."
+            "\n  - Clear your terminal scrollback after copying the token."
+        )
     else:
         print(f"\nError: {result}")
 
