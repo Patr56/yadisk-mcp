@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 import asyncio
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 import yadisk
@@ -19,20 +20,35 @@ _MAX_COMPLETED_JOBS = 200  # cap to prevent unbounded memory growth
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 # None = not explicitly set (fall back to env var); True/False = explicit override
-_config: dict[str, bool | None] = {"read_only": None}
+_config: dict[str, bool | None] = {"read_only": None, "safe_delete": None}
+
+_UNSET: Any = object()
+
+# Safe-delete mode moves "deleted" items here instead of removing them.
+LEGACY_ROOT = "/LEGACY"
+
+_TRUTHY = ("1", "true", "yes")
 
 
-def configure(*, read_only: bool | None = None) -> None:
+def configure(*, read_only: bool | None = _UNSET, safe_delete: bool | None = _UNSET) -> None:
     """Configure the MCP server programmatically.
 
     Explicit values set here take priority over environment variables.
+    Options that are not passed keep their current value.
 
     Args:
         read_only: If True, all write operations are disabled. If False, explicitly
                    enables writes even when YADISK_MCP_READ_ONLY env var is set.
-                   If None (default), defers to the YADISK_MCP_READ_ONLY env var.
+                   If None, defers to the YADISK_MCP_READ_ONLY env var.
+        safe_delete: If True, nothing is ever destroyed: delete() moves items to
+                     /LEGACY/<date>/..., permanent deletion, emptying Trash and
+                     overwrite=True are refused. If None, defers to the
+                     YADISK_MCP_SAFE_DELETE env var.
     """
-    _config["read_only"] = read_only
+    if read_only is not _UNSET:
+        _config["read_only"] = read_only
+    if safe_delete is not _UNSET:
+        _config["safe_delete"] = safe_delete
 
 
 # ─── Security helpers ─────────────────────────────────────────────────────────
@@ -62,6 +78,70 @@ def _assert_writable() -> None:
         raise PermissionError(
             "The server is running in read-only mode. This operation is not allowed."
         )
+
+
+def _is_safe_delete() -> bool:
+    """Priority: configure(safe_delete=...) > --safe-delete CLI flag > YADISK_MCP_SAFE_DELETE."""
+    explicit = _config["safe_delete"]
+    if explicit is not None:
+        return explicit
+    return os.environ.get("YADISK_MCP_SAFE_DELETE", "").lower() in _TRUTHY
+
+
+def _refuse_in_safe_delete(what: str) -> None:
+    if _is_safe_delete():
+        raise PermissionError(
+            f"{what} is not allowed: the server is running in safe-delete mode. "
+            f"Use delete() to move items to {LEGACY_ROOT} instead."
+        )
+
+
+def _assert_no_overwrite(overwrite: bool) -> None:
+    if overwrite:
+        _refuse_in_safe_delete("Overwriting existing items (overwrite=True)")
+
+
+def _normalize_path(path: str) -> str:
+    """'disk:/a/b/' -> '/a/b'; '' or 'disk:' -> '/'."""
+    p = path.strip()
+    if p.startswith("disk:"):
+        p = p[len("disk:"):]
+    p = "/" + p.strip("/")
+    return p
+
+
+def _is_inside_legacy(normalized: str) -> bool:
+    root = LEGACY_ROOT.casefold()
+    p = normalized.casefold()
+    return p == root or p.startswith(root + "/")
+
+
+def _today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _now_hms() -> str:
+    return datetime.now().strftime("%H%M%S")
+
+
+async def _ensure_dir(client: Any, path: str) -> None:
+    """Create `path` and any missing parents (Yandex mkdir is not recursive)."""
+    current = ""
+    for part in path.strip("/").split("/"):
+        current = f"{current}/{part}"
+        if await client.exists(current):
+            continue
+        try:
+            await client.mkdir(current)
+        except yadisk.exceptions.PathExistsError:
+            pass
+
+
+async def _legacy_target(client: Any, normalized: str) -> str:
+    target = f"{LEGACY_ROOT}/{_today()}{normalized}"
+    if await client.exists(target):
+        target = f"{target}__{_now_hms()}"
+    return target
 
 
 def _get_upload_allowed_dirs() -> list[str] | None:
@@ -207,30 +287,41 @@ async def list_recent_files(limit: int = 20) -> list[dict]:
         limit: Max number of files to return (1–100).
     """
     async with get_async_client() as client:
-        result = []
-        async for item in client.get_last_uploaded(limit=min(limit, 100)):
-            result.append(_resource_to_dict(item))
-        return result
+        # get_last_uploaded is a coroutine returning a list (not an async generator)
+        items = await client.get_last_uploaded(limit=min(limit, 100))
+        return [_resource_to_dict(item) for item in items]
 
 
 @mcp.tool()
 async def search_files(query: str, limit: int = 20, media_type: str | None = None) -> list[dict]:
-    """Search for files on Yandex Disk by name.
+    """Search for files on Yandex Disk by name (case-insensitive substring).
+
+    The Yandex Disk API has no search endpoint, so this scans the flat list of
+    all files on the disk and filters by name. Folders are not matched. On a
+    large disk this can take a while; use media_type to narrow the scan.
 
     Args:
-        query: Search query string.
+        query: Substring to look for in file names.
         limit: Max results (1–100).
         media_type: Optional media type filter: audio, backup, book, compressed,
                     data, development, disk_image, document, encoded, executable,
                     flash, font, image, msi, text, unknown, video, web.
     """
+    needle = query.strip().casefold()
+    if not needle:
+        raise ValueError("query must not be empty")
+    cap = max(1, min(limit, 100))
     async with get_async_client() as client:
-        kwargs: dict[str, Any] = {"limit": min(limit, 100)}
+        # `limit` here is the page size of each API request, not a result cap
+        kwargs: dict[str, Any] = {"limit": 1000}
         if media_type:
             kwargs["media_type"] = media_type
         result = []
-        async for item in client.search(query, **kwargs):
-            result.append(_resource_to_dict(item))
+        async for item in client.get_files(**kwargs):
+            if needle in (getattr(item, "name", None) or "").casefold():
+                result.append(_resource_to_dict(item))
+                if len(result) >= cap:
+                    break
         return result
 
 
@@ -267,11 +358,16 @@ async def create_folder(path: str) -> dict:
 async def delete(path: str, permanently: bool = False) -> dict:
     """Delete a file or folder.
 
+    In safe-delete mode the item is moved to /LEGACY/<YYYY-MM-DD>/<original path>
+    instead of being removed, and permanently=True is refused.
+
     Args:
         path: Path to delete (e.g. "/Documents/old_file.txt").
         permanently: If True, skip trash and delete permanently. Default False.
     """
     _assert_writable()
+    if _is_safe_delete():
+        return await _safe_delete(path, permanently)
     # H2: prevent accidentally nuking the entire disk root permanently
     normalized = path.rstrip("/") or "/"
     if normalized in ("/", "disk:") and permanently:
@@ -282,6 +378,24 @@ async def delete(path: str, permanently: bool = False) -> dict:
     async with get_async_client() as client:
         await client.remove(path, permanently=permanently)
         return {"deleted": path, "permanently": permanently}
+
+
+async def _safe_delete(path: str, permanently: bool) -> dict:
+    if permanently:
+        _refuse_in_safe_delete("Permanent deletion")
+    normalized = _normalize_path(path)
+    if normalized == "/":
+        raise PermissionError("Deleting the disk root is not allowed in safe-delete mode.")
+    if _is_inside_legacy(normalized):
+        raise PermissionError(
+            f"Items inside {LEGACY_ROOT} are removed manually by the disk owner, "
+            "not by this server."
+        )
+    async with get_async_client() as client:
+        target = await _legacy_target(client, normalized)
+        await _ensure_dir(client, target.rsplit("/", 1)[0])
+        await client.move(normalized, target, overwrite=False)
+        return {"deleted": path, "moved_to": target, "permanently": False}
 
 
 # ─── Copy / move ──────────────────────────────────────────────────────────────
@@ -296,6 +410,7 @@ async def copy(src: str, dst: str, overwrite: bool = False) -> dict:
         overwrite: Overwrite destination if it exists.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     async with get_async_client() as client:
         await client.copy(src, dst, overwrite=overwrite)
         return {"copied": {"from": src, "to": dst}}
@@ -311,6 +426,7 @@ async def move(src: str, dst: str, overwrite: bool = False) -> dict:
         overwrite: Overwrite destination if it exists.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     async with get_async_client() as client:
         await client.move(src, dst, overwrite=overwrite)
         return {"moved": {"from": src, "to": dst}}
@@ -362,6 +478,7 @@ async def upload_local_file(local_path: str, disk_path: str, overwrite: bool = F
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     # H1: resolve symlinks and enforce allowlist
     real_path = _check_upload_path(local_path)
     if not os.path.isfile(real_path):
@@ -387,6 +504,7 @@ async def upload_local_file_background(
         overwrite: Overwrite if file already exists on Yandex Disk.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     # H1: resolve symlinks and enforce allowlist
     real_path = _check_upload_path(local_path)
     if not os.path.isfile(real_path):
@@ -465,6 +583,7 @@ async def upload_from_url(url: str, path: str, overwrite: bool = False) -> dict:
         overwrite: Overwrite if file already exists.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     # M3: reject non-http(s) and localhost/link-local URLs
     _validate_url(url)
     async with get_async_client() as client:
@@ -550,6 +669,7 @@ async def restore_from_trash(path: str, destination: str | None = None, overwrit
         overwrite: Overwrite if destination already exists.
     """
     _assert_writable()
+    _assert_no_overwrite(overwrite)
     async with get_async_client() as client:
         kwargs: dict[str, Any] = {"overwrite": overwrite}
         if destination:
@@ -562,6 +682,7 @@ async def restore_from_trash(path: str, destination: str | None = None, overwrit
 async def empty_trash() -> dict:
     """Permanently delete all files in Trash."""
     _assert_writable()
+    _refuse_in_safe_delete("Emptying Trash")
     async with get_async_client() as client:
         await client.remove_trash("/")
         return {"trash": "emptied"}
@@ -600,9 +721,21 @@ def main() -> None:
         default=False,
         help="Disable all write operations (overrides YADISK_MCP_READ_ONLY env var)",
     )
+    parser.add_argument(
+        "--safe-delete",
+        action="store_true",
+        default=False,
+        help=(
+            "Never destroy data: delete moves items to /LEGACY/<date>/, permanent "
+            "deletion, emptying Trash and overwrite=True are refused "
+            "(overrides YADISK_MCP_SAFE_DELETE env var)"
+        ),
+    )
     args = parser.parse_args()
     if args.read_only:
         configure(read_only=True)
+    if args.safe_delete:
+        configure(safe_delete=True)
     mcp.run()
 
 

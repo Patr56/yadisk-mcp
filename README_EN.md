@@ -221,6 +221,21 @@ In Claude Desktop config:
 
 **Allowed:** `disk_info`, `list_files`, `list_recent_files`, `search_files`, `get_metadata`, `get_download_url`, `get_public_resource`, `list_trash`
 
+## Safe-delete mode
+
+With `--safe-delete` (or `YADISK_MCP_SAFE_DELETE=true`) the server never destroys data:
+
+- `delete` moves the item to `/LEGACY/<YYYY-MM-DD>/<original path>` instead of removing it. If the target already exists, a `__HHMMSS` suffix is appended.
+- `delete(permanently=True)` and `empty_trash` are refused.
+- `overwrite=True` is refused in `copy`, `move`, `upload_local_file`, `upload_local_file_background`, `upload_from_url`, `restore_from_trash`.
+- Items inside `/LEGACY` are never touched by the server; the disk owner cleans them up manually.
+
+```bash
+yadisk-mcp --safe-delete
+```
+
+Programmatically: `configure(safe_delete=True)`. Can be combined with `--read-only`.
+
 ## Security
 
 ### Restricting file uploads

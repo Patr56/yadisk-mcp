@@ -221,6 +221,21 @@ mcp.run()
 
 **Доступны:** `disk_info`, `list_files`, `list_recent_files`, `search_files`, `get_metadata`, `get_download_url`, `get_public_resource`, `list_trash`
 
+## Безопасное удаление (safe-delete)
+
+С флагом `--safe-delete` (или `YADISK_MCP_SAFE_DELETE=true`) сервер ничего не уничтожает:
+
+- `delete` не удаляет, а переносит объект в `/LEGACY/<YYYY-MM-DD>/<исходный путь>`. Если там уже есть объект с таким именем, к имени добавляется суффикс `__HHMMSS`.
+- `delete(permanently=True)` и `empty_trash` запрещены.
+- `overwrite=True` запрещён в `copy`, `move`, `upload_local_file`, `upload_local_file_background`, `upload_from_url`, `restore_from_trash`.
+- Объекты внутри `/LEGACY` сервер не трогает — их чистит владелец диска вручную.
+
+```bash
+yadisk-mcp --safe-delete
+```
+
+Программно: `configure(safe_delete=True)`. Можно сочетать с `--read-only`.
+
 ## Безопасность
 
 ### Ограничение загрузки файлов
