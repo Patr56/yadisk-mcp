@@ -188,7 +188,10 @@ def test_check_upload_path_resolves_symlinks(tmp_path):
     secret = outside / "secret.txt"
     secret.write_text("secret")
     link = allowed / "link.txt"
-    link.symlink_to(secret)
+    try:
+        link.symlink_to(secret)
+    except OSError as exc:  # e.g. WinError 1314 without Developer Mode/admin
+        pytest.skip(f"cannot create symlinks here: {exc}")
 
     with patch.dict(os.environ, {"YADISK_MCP_UPLOAD_ALLOWED_DIRS": str(allowed)}):
         with pytest.raises(PermissionError, match="not allowed"):
