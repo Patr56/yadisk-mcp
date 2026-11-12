@@ -2,7 +2,7 @@
 
 import os
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import yadisk_mcp.server as srv
 from yadisk_mcp.server import (
@@ -196,13 +196,13 @@ async def test_ro_list_files_allowed(read_only):
 
 
 async def test_ro_list_recent_files_allowed(read_only):
-    read_only.get_last_uploaded = async_iter([])
+    read_only.get_last_uploaded = AsyncMock(return_value=[])
     result = await list_recent_files()
     assert result == []
 
 
 async def test_ro_search_files_allowed(read_only):
-    read_only.search = async_iter([])
+    read_only.get_files = async_iter([])
     result = await search_files("query")
     assert result == []
 
